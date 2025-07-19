@@ -11,7 +11,7 @@ Sub DownloadPDFsToFolders()
     ' Set base download folder (you can change this)
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
 
-    ' Create base folder if it doesn't exist
+    ' Create base folder if not exists
     If Dir(baseFolder, vbDirectory) = "" Then
         MkDir baseFolder
     End If
@@ -30,57 +30,39 @@ Sub DownloadPDFsToFolders()
             MkDir rowFolderPath
         End If
 
-        ' Download files if URLs are valid
+        ' Download PDFs if URLs are valid
         If url1 <> "" Then
-            DownloadFile url1, rowFolderPath & "\file1"
+            DownloadFile url1, rowFolderPath & "\file1.pdf"
         End If
         If url2 <> "" Then
-            DownloadFile url2, rowFolderPath & "\file2"
+            DownloadFile url2, rowFolderPath & "\file2.pdf"
         End If
     Next i
 
-    MsgBox "Downloads completed!"
+    MsgBox "PDF downloads completed!"
+
 End Sub
 
-Sub DownloadFile(ByVal fileURL As String, ByVal savePathWithoutExt As String)
+Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
     Dim WinHttpReq As Object
     Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
-
+    
     On Error GoTo ErrorHandler
     WinHttpReq.Open "GET", fileURL, False
     WinHttpReq.Send
 
     If WinHttpReq.Status = 200 Then
-        Dim contentType As String
-        contentType = WinHttpReq.getResponseHeader("Content-Type")
-
-        Dim fileExt As String
-        ' Determine file extension based on content type
-        Select Case True
-            Case InStr(contentType, "pdf") > 0
-                fileExt = ".pdf"
-            Case InStr(contentType, "msword") > 0
-                fileExt = ".doc"
-            Case InStr(contentType, "officedocument.wordprocessingml.document") > 0
-                fileExt = ".docx"
-            Case Else
-                ' Unknown file type fallback
-                fileExt = ".bin"
-        End Select
-
         Dim oStream As Object
         Set oStream = CreateObject("ADODB.Stream")
         oStream.Type = 1 ' Binary
         oStream.Open
         oStream.Write WinHttpReq.responseBody
-        oStream.SaveToFile savePathWithoutExt & fileExt, 2 ' Overwrite if exists
+        oStream.SaveToFile savePath, 2 ' Overwrite
         oStream.Close
-    Else
-        Debug.Print "Failed to download " & fileURL & " Status: " & WinHttpReq.Status
     End If
 
     Exit Sub
 
 ErrorHandler:
-    Debug.Print "Error downloading: " & fileURL & " - " & Err.Description
+    Debug.Print "Error downloading: " & fileURL
 End Sub
