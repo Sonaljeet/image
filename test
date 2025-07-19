@@ -1,10 +1,16 @@
-Sub DownloadAndSave(ByVal fileURL As String, ByVal savePath As String, ByVal detectExtension As Boolean)
+Sub DownloadAndSave_Authenticated(ByVal fileURL As String, ByVal savePath As String, ByVal detectExtension As Boolean)
     Dim http As Object, stream As Object
     Dim contentType As String, fileExt As String
 
     Set http = CreateObject("MSXML2.ServerXMLHTTP")
     http.Open "GET", fileURL, False
-    
+
+    ' --- Replace with actual headers from browser ---
+    http.setRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    http.setRequestHeader "Cookie", "insert_full_cookie_string_here"
+    http.setRequestHeader "Referer", "https://yourcompanysite.com/"
+    ' Optional: http.setRequestHeader "Authorization", "Bearer your_token"
+
     On Error GoTo ErrHandler
     http.Send
 
@@ -27,10 +33,10 @@ Sub DownloadAndSave(ByVal fileURL As String, ByVal savePath As String, ByVal det
         stream.SaveToFile savePath, 2 'overwrite
         stream.Close
     Else
-        MsgBox "Failed to download: " & fileURL & vbCrLf & "Status: " & http.Status
+        MsgBox "Failed: " & fileURL & vbCrLf & "HTTP Status: " & http.Status
     End If
     Exit Sub
 
 ErrHandler:
-    MsgBox "Access denied or request failed for URL: " & fileURL, vbCritical
+    MsgBox "Access denied or request failed: " & fileURL, vbCritical
 End Sub
