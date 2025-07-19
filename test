@@ -1,82 +1,48 @@
-Sub DownloadAndOrganizeFiles()
+Sub DownloadPDFsToFolders()
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(1) ' Adjust if needed
+    Set ws = ThisWorkbook.Sheets(1) ' Change if needed
 
     Dim lastRow As Long, lastCol As Long
-    Dim baseFolder As String, rowFolderPath As String
-    Dim downloadsPath As String
     Dim url1 As String, url2 As String
-    Dim tempDownloadPath As String
-    Dim destPath As String
+    Dim rowFolderPath As String
+    Dim baseFolder As String
     Dim i As Long
-    Dim ext1 As String, ext2 As String
 
-    downloadsPath = Environ$("USERPROFILE") & "\Downloads\"
+    ' Set base download folder (you can change this)
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
-    If Dir(baseFolder, vbDirectory) = "" Then MkDir baseFolder
 
+    ' Create base folder if it doesn't exist
+    If Dir(baseFolder, vbDirectory) = "" Then
+        MkDir baseFolder
+    End If
+
+    ' Get last row and last two columns
     lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
 
-    For i = 2 To lastRow
+    For i = 2 To lastRow ' Assuming header in row 1
         url1 = Trim(ws.Cells(i, lastCol - 1).Value)
         url2 = Trim(ws.Cells(i, lastCol).Value)
 
-        ' Create Row_i folder
+        ' Create folder for the current row
         rowFolderPath = baseFolder & "\Row_" & i
-        If Dir(rowFolderPath, vbDirectory) = "" Then MkDir rowFolderPath
-
-        ' ----------- Process URL1 -----------
-        If url1 <> "" Then
-            ' Download file from URL1 to Downloads folder with temp name
-            tempDownloadPath = downloadsPath & "tempfile1"
-            DownloadFile url1, tempDownloadPath
-
-            ' Determine extension from downloaded file
-            ext1 = GetFileExtensionFromFile(tempDownloadPath)
-            If ext1 = "" Then ext1 = ".pdf" ' default fallback
-
-            ' Define destination path with proper extension
-            destPath = rowFolderPath & "\file1" & ext1
-
-            ' Copy file to Row_i folder with correct extension
-            FileCopy tempDownloadPath, destPath
-
-            ' Delete temp file
-            Kill tempDownloadPath
-
-            ' If Word doc, convert to PDF and delete Word file
-            If LCase(ext1) = ".doc" Or LCase(ext1) = ".docx" Then
-                ConvertWordToPDF destPath, Replace(destPath, ext1, ".pdf")
-                Kill destPath
-            End If
+        If Dir(rowFolderPath, vbDirectory) = "" Then
+            MkDir rowFolderPath
         End If
 
-        ' ----------- Process URL2 (similar to URL1) -----------
+        ' Download files if URLs are valid
+        If url1 <> "" Then
+            DownloadFile url1, rowFolderPath & "\file1"
+        End If
         If url2 <> "" Then
-            tempDownloadPath = downloadsPath & "tempfile2"
-            DownloadFile url2, tempDownloadPath
-
-            ext2 = GetFileExtensionFromFile(tempDownloadPath)
-            If ext2 = "" Then ext2 = ".pdf"
-
-            destPath = rowFolderPath & "\file2" & ext2
-
-            FileCopy tempDownloadPath, destPath
-            Kill tempDownloadPath
-
-            If LCase(ext2) = ".doc" Or LCase(ext2) = ".docx" Then
-                ConvertWordToPDF destPath, Replace(destPath, ext2, ".pdf")
-                Kill destPath
-            End If
+            DownloadFile url2, rowFolderPath & "\file2"
         End If
     Next i
 
-    MsgBox "Downloads, copies, and conversions completed!"
+    MsgBox "Downloads completed!"
 End Sub
 
-' Downloads a file from URL and saves as savePath
-Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
+Sub DownloadFile(ByVal fileURL As String, ByVal savePathWithoutExt As String)
     Dim WinHttpReq As Object
     Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
 
@@ -85,58 +51,36 @@ Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
     WinHttpReq.Send
 
     If WinHttpReq.Status = 200 Then
+        Dim contentType As String
+        contentType = WinHttpReq.getResponseHeader("Content-Type")
+
+        Dim fileExt As String
+        ' Determine file extension based on content type
+        Select Case True
+            Case InStr(contentType, "pdf") > 0
+                fileExt = ".pdf"
+            Case InStr(contentType, "msword") > 0
+                fileExt = ".doc"
+            Case InStr(contentType, "officedocument.wordprocessingml.document") > 0
+                fileExt = ".docx"
+            Case Else
+                ' Unknown file type fallback
+                fileExt = ".bin"
+        End Select
+
         Dim oStream As Object
         Set oStream = CreateObject("ADODB.Stream")
         oStream.Type = 1 ' Binary
         oStream.Open
         oStream.Write WinHttpReq.responseBody
-        oStream.SaveToFile savePath, 2 ' Overwrite
+        oStream.SaveToFile savePathWithoutExt & fileExt, 2 ' Overwrite if exists
         oStream.Close
     Else
-        MsgBox "Download failed for URL: " & fileURL
+        Debug.Print "Failed to download " & fileURL & " Status: " & WinHttpReq.Status
     End If
 
     Exit Sub
 
 ErrorHandler:
-    MsgBox "Error downloading file: " & fileURL
-End Sub
-
-' Try to get extension from file content or name
-Function GetFileExtensionFromFile(filePath As String) As String
-    Dim fso As Object
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    If fso.FileExists(filePath) Then
-        Dim ext As String
-        ext = LCase(fso.GetExtensionName(filePath))
-        If ext <> "" Then
-            GetFileExtensionFromFile = "." & ext
-        Else
-            GetFileExtensionFromFile = "" ' unknown
-        End If
-    Else
-        GetFileExtensionFromFile = ""
-    End If
-End Function
-
-' Converts Word doc/docx file to PDF
-Sub ConvertWordToPDF(docPath As String, pdfPath As String)
-    On Error GoTo ErrorHandler
-    Dim wdApp As Object, wdDoc As Object
-    Set wdApp = CreateObject("Word.Application")
-    wdApp.Visible = False
-
-    Set wdDoc = wdApp.Documents.Open(docPath, ReadOnly:=True)
-    wdDoc.ExportAsFixedFormat OutputFileName:=pdfPath, ExportFormat:=17
-    wdDoc.Close False
-    wdApp.Quit
-
-    Set wdDoc = Nothing
-    Set wdApp = Nothing
-    Exit Sub
-
-ErrorHandler:
-    MsgBox "Error converting Word to PDF: " & docPath
-    If Not wdApp Is Nothing Then wdApp.Quit
+    Debug.Print "Error downloading: " & fileURL & " - " & Err.Description
 End Sub
