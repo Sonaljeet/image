@@ -7,14 +7,14 @@ Sub DownloadPDFsToFolders()
     Dim rowFolderPath As String
     Dim baseFolder As String
     Dim i As Long
+    Dim fileName2 As String
+    Dim latestPDF As String
 
-    ' Set base download folder (you can change this)
+    ' Set base download folder
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
 
     ' Create base folder if not exists
-    If Dir(baseFolder, vbDirectory) = "" Then
-        MkDir baseFolder
-    End If
+    If Dir(baseFolder, vbDirectory) = "" Then MkDir baseFolder
 
     ' Get last row and last two columns
     lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
@@ -26,23 +26,36 @@ Sub DownloadPDFsToFolders()
 
         ' Create folder for the current row
         rowFolderPath = baseFolder & "\Row_" & i
-        If Dir(rowFolderPath, vbDirectory) = "" Then
-            MkDir rowFolderPath
+        If Dir(rowFolderPath, vbDirectory) = "" Then MkDir rowFolderPath
+
+        ' === Handle URL1 - assumed to download via browser ===
+        If url1 <> "" Then
+            ' Open the URL in browser
+            ThisWorkbook.FollowHyperlink url1
+
+            ' Wait a few seconds for the file to download
+            Application.Wait Now + TimeValue("0:00:05") ' Adjust time if needed
+
+            ' Get latest PDF from Downloads folder
+            latestPDF = GetLatestDownloadedPDF()
+            If latestPDF <> "" Then
+                FileCopy latestPDF, rowFolderPath & "\" & Dir(latestPDF)
+            Else
+                Debug.Print "No recent PDF found in Downloads."
+            End If
         End If
 
-        ' Download PDFs if URLs are valid
-        If url1 <> "" Then
-            DownloadFile url1, rowFolderPath & "\file1.pdf"
-        End If
+        ' === Handle URL2 - download via HTTP request ===
         If url2 <> "" Then
-            DownloadFile url2, rowFolderPath & "\file2.pdf"
+            fileName2 = GetFileNameFromURL(url2)
+            DownloadFile url2, rowFolderPath & "\" & fileName2
         End If
     Next i
 
     MsgBox "PDF downloads completed!"
-
 End Sub
 
+' Download file using HTTP request
 Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
     Dim WinHttpReq As Object
     Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
@@ -66,3 +79,31 @@ Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
 ErrorHandler:
     Debug.Print "Error downloading: " & fileURL
 End Sub
+
+' Extract filename from URL
+Function GetFileNameFromURL(fileURL As String) As String
+    Dim parts() As String
+    parts = Split(fileURL, "/")
+    GetFileNameFromURL = parts(UBound(parts))
+End Function
+
+' Get the most recent PDF from Downloads folder
+Function GetLatestDownloadedPDF() As String
+    Dim downloadFolder As String
+    Dim fileName As String
+    Dim latestFile As String
+    Dim latestDate As Date
+
+    downloadFolder = Environ("USERPROFILE") & "\Downloads"
+    fileName = Dir(downloadFolder & "\*.pdf")
+
+    Do While fileName <> ""
+        If FileDateTime(downloadFolder & "\" & fileName) > latestDate Then
+            latestDate = FileDateTime(downloadFolder & "\" & fileName)
+            latestFile = downloadFolder & "\" & fileName
+        End If
+        fileName = Dir
+    Loop
+
+    GetLatestDownloadedPDF = latestFile
+End Function
