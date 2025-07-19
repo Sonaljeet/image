@@ -1,0 +1,68 @@
+Sub DownloadPDFsToFolders()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets(1) ' Change if needed
+
+    Dim lastRow As Long, lastCol As Long
+    Dim url1 As String, url2 As String
+    Dim rowFolderPath As String
+    Dim baseFolder As String
+    Dim i As Long
+
+    ' Set base download folder (you can change this)
+    baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
+
+    ' Create base folder if not exists
+    If Dir(baseFolder, vbDirectory) = "" Then
+        MkDir baseFolder
+    End If
+
+    ' Get last row and last two columns
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+
+    For i = 2 To lastRow ' Assuming header in row 1
+        url1 = Trim(ws.Cells(i, lastCol - 1).Value)
+        url2 = Trim(ws.Cells(i, lastCol).Value)
+
+        ' Create folder for the current row
+        rowFolderPath = baseFolder & "\Row_" & i
+        If Dir(rowFolderPath, vbDirectory) = "" Then
+            MkDir rowFolderPath
+        End If
+
+        ' Download PDFs if URLs are valid
+        If url1 <> "" Then
+            DownloadFile url1, rowFolderPath & "\file1.pdf"
+        End If
+        If url2 <> "" Then
+            DownloadFile url2, rowFolderPath & "\file2.pdf"
+        End If
+    Next i
+
+    MsgBox "PDF downloads completed!"
+
+End Sub
+
+Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
+    Dim WinHttpReq As Object
+    Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
+    
+    On Error GoTo ErrorHandler
+    WinHttpReq.Open "GET", fileURL, False
+    WinHttpReq.Send
+
+    If WinHttpReq.Status = 200 Then
+        Dim oStream As Object
+        Set oStream = CreateObject("ADODB.Stream")
+        oStream.Type = 1 ' Binary
+        oStream.Open
+        oStream.Write WinHttpReq.responseBody
+        oStream.SaveToFile savePath, 2 ' Overwrite
+        oStream.Close
+    End If
+
+    Exit Sub
+
+ErrorHandler:
+    Debug.Print "Error downloading: " & fileURL
+End Sub
