@@ -1,13 +1,15 @@
-Sub MoveLatestDownloadedFilesToRowFolders()
+Sub DownloadAndOrganizeFiles()
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(1)
+    Set ws = ThisWorkbook.Sheets(1) ' Adjust if needed
 
     Dim lastRow As Long, lastCol As Long
-    Dim rowFolderPath As String, baseFolder As String
+    Dim baseFolder As String, rowFolderPath As String
     Dim downloadsPath As String
-    Dim latestFile As String, fileExt As String
-    Dim sourcePath As String, destPath As String
+    Dim url1 As String, url2 As String
+    Dim tempDownloadPath As String
+    Dim destPath As String
     Dim i As Long
+    Dim ext1 As String, ext2 As String
 
     downloadsPath = Environ$("USERPROFILE") & "\Downloads\"
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
@@ -17,83 +19,108 @@ Sub MoveLatestDownloadedFilesToRowFolders()
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
 
     For i = 2 To lastRow
+        url1 = Trim(ws.Cells(i, lastCol - 1).Value)
+        url2 = Trim(ws.Cells(i, lastCol).Value)
+
+        ' Create Row_i folder
         rowFolderPath = baseFolder & "\Row_" & i
         If Dir(rowFolderPath, vbDirectory) = "" Then MkDir rowFolderPath
 
-        ' Wait for a new file to appear in Downloads (20 seconds timeout)
-        latestFile = WaitForLatestFile(downloadsPath, 20)
-        If latestFile = "" Then
-            MsgBox "No new file found in Downloads for Row " & i, vbExclamation
-            GoTo ContinueLoop
+        ' ----------- Process URL1 -----------
+        If url1 <> "" Then
+            ' Download file from URL1 to Downloads folder with temp name
+            tempDownloadPath = downloadsPath & "tempfile1"
+            DownloadFile url1, tempDownloadPath
+
+            ' Determine extension from downloaded file
+            ext1 = GetFileExtensionFromFile(tempDownloadPath)
+            If ext1 = "" Then ext1 = ".pdf" ' default fallback
+
+            ' Define destination path with proper extension
+            destPath = rowFolderPath & "\file1" & ext1
+
+            ' Copy file to Row_i folder with correct extension
+            FileCopy tempDownloadPath, destPath
+
+            ' Delete temp file
+            Kill tempDownloadPath
+
+            ' If Word doc, convert to PDF and delete Word file
+            If LCase(ext1) = ".doc" Or LCase(ext1) = ".docx" Then
+                ConvertWordToPDF destPath, Replace(destPath, ext1, ".pdf")
+                Kill destPath
+            End If
         End If
 
-        sourcePath = downloadsPath & latestFile
-        fileExt = GetFileExtension(latestFile)
-        destPath = rowFolderPath & "\file1" & fileExt
+        ' ----------- Process URL2 (similar to URL1) -----------
+        If url2 <> "" Then
+            tempDownloadPath = downloadsPath & "tempfile2"
+            DownloadFile url2, tempDownloadPath
 
-        ' Copy file from Downloads to Row_i folder
-        FileCopy sourcePath, destPath
+            ext2 = GetFileExtensionFromFile(tempDownloadPath)
+            If ext2 = "" Then ext2 = ".pdf"
 
-        ' Optional: delete original from Downloads after copy
-        ' Kill sourcePath
+            destPath = rowFolderPath & "\file2" & ext2
 
-        ' Convert Word docs to PDF and delete original Word file
-        If LCase(fileExt) = ".doc" Or LCase(fileExt) = ".docx" Then
-            ConvertWordToPDF destPath, Replace(destPath, fileExt, ".pdf")
-            Kill destPath
+            FileCopy tempDownloadPath, destPath
+            Kill tempDownloadPath
+
+            If LCase(ext2) = ".doc" Or LCase(ext2) = ".docx" Then
+                ConvertWordToPDF destPath, Replace(destPath, ext2, ".pdf")
+                Kill destPath
+            End If
         End If
-
-ContinueLoop:
     Next i
 
-    MsgBox "Files moved and converted where needed!"
+    MsgBox "Downloads, copies, and conversions completed!"
 End Sub
 
-' Waits for a file to appear in the folder and returns the newest file name or "" if timeout
-Function WaitForLatestFile(folderPath As String, timeoutSeconds As Integer) As String
-    Dim startTime As Single
-    Dim fso As Object
-    Dim folder As Object
-    Dim file As Object
-    Dim latestFileName As String
-    Dim latestDate As Date
+' Downloads a file from URL and saves as savePath
+Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
+    Dim WinHttpReq As Object
+    Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
 
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set folder = fso.GetFolder(folderPath)
+    On Error GoTo ErrorHandler
+    WinHttpReq.Open "GET", fileURL, False
+    WinHttpReq.Send
 
-    startTime = Timer
-    Do
-        latestDate = #1/1/1900#
-        latestFileName = ""
-
-        For Each file In folder.Files
-            If file.DateLastModified > latestDate Then
-                latestDate = file.DateLastModified
-                latestFileName = file.Name
-            End If
-        Next
-
-        If latestFileName <> "" Then
-            WaitForLatestFile = latestFileName
-            Exit Function
-        End If
-
-        DoEvents
-        If Timer - startTime > timeoutSeconds Then Exit Do
-        Application.Wait Now + TimeValue("0:00:01") ' Wait 1 second
-    Loop
-
-    WaitForLatestFile = ""
-End Function
-
-Function GetFileExtension(fileName As String) As String
-    If InStrRev(fileName, ".") > 0 Then
-        GetFileExtension = Mid(fileName, InStrRev(fileName, "."))
+    If WinHttpReq.Status = 200 Then
+        Dim oStream As Object
+        Set oStream = CreateObject("ADODB.Stream")
+        oStream.Type = 1 ' Binary
+        oStream.Open
+        oStream.Write WinHttpReq.responseBody
+        oStream.SaveToFile savePath, 2 ' Overwrite
+        oStream.Close
     Else
-        GetFileExtension = ""
+        MsgBox "Download failed for URL: " & fileURL
+    End If
+
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "Error downloading file: " & fileURL
+End Sub
+
+' Try to get extension from file content or name
+Function GetFileExtensionFromFile(filePath As String) As String
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    If fso.FileExists(filePath) Then
+        Dim ext As String
+        ext = LCase(fso.GetExtensionName(filePath))
+        If ext <> "" Then
+            GetFileExtensionFromFile = "." & ext
+        Else
+            GetFileExtensionFromFile = "" ' unknown
+        End If
+    Else
+        GetFileExtensionFromFile = ""
     End If
 End Function
 
+' Converts Word doc/docx file to PDF
 Sub ConvertWordToPDF(docPath As String, pdfPath As String)
     On Error GoTo ErrorHandler
     Dim wdApp As Object, wdDoc As Object
