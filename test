@@ -1,21 +1,15 @@
-Sub DownloadPDFsToFolders()
+Sub DownloadFilesToFolders()
     Dim ws As Worksheet
     Set ws = ThisWorkbook.Sheets(1)
 
     Dim lastRow As Long, lastCol As Long
     Dim url1 As String, url2 As String
-    Dim fileName As String
+    Dim fileExt As String
     Dim rowFolderPath As String
     Dim baseFolder As String
-    Dim downloadsPath As String
-    Dim sourcePath As String
     Dim destPath As String
     Dim i As Long
 
-    ' User's Downloads folder
-    downloadsPath = Environ$("USERPROFILE") & "\Downloads\"
-
-    ' Base destination folder
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
     If Dir(baseFolder, vbDirectory) = "" Then MkDir baseFolder
 
@@ -29,72 +23,49 @@ Sub DownloadPDFsToFolders()
         rowFolderPath = baseFolder & "\Row_" & i
         If Dir(rowFolderPath, vbDirectory) = "" Then MkDir rowFolderPath
 
-        ' === Handle URL1 ===
+        ' Download and process url1
         If url1 <> "" Then
-            fileName = GetFileNameFromURL(url1)
-            sourcePath = downloadsPath & fileName
-            destPath = rowFolderPath & "\file1.pdf"
-
-            ' Download to Downloads folder
-            DownloadFile url1, sourcePath
-
-            ' Wait until file exists (max 10 seconds)
-            If WaitForFile(sourcePath, 10) Then
-                FileCopy sourcePath, destPath
-                ' Optionally delete original
-                ' Kill sourcePath
-            Else
-                MsgBox "Timeout waiting for: " & fileName
+            fileExt = GetExtensionFromURLResponse(url1)
+            If fileExt = "" Then fileExt = ".bin"
+            destPath = rowFolderPath & "\file1" & fileExt
+            DownloadFile url1, destPath
+            If LCase(fileExt) = ".doc" Or LCase(fileExt) = ".docx" Then
+                ConvertWordToPDF destPath, Replace(destPath, fileExt, ".pdf")
+                Kill destPath ' Delete Word file after conversion
             End If
         End If
 
-        ' === Handle URL2 directly into row folder ===
+        ' Download and process url2
         If url2 <> "" Then
-            DownloadFile url2, rowFolderPath & "\file2.pdf"
+            fileExt = GetFileExtensionFromURL(url2)
+            destPath = rowFolderPath & "\file2" & fileExt
+            DownloadFile url2, destPath
+            If LCase(fileExt) = ".doc" Or LCase(fileExt) = ".docx" Then
+                ConvertWordToPDF destPath, Replace(destPath, fileExt, ".pdf")
+                Kill destPath ' Delete Word file after conversion
+            End If
         End If
     Next i
 
-    MsgBox "PDF downloads completed!"
+    MsgBox "Download and conversion completed!"
 End Sub
 
-Function GetFileNameFromURL(ByVal fileURL As String) As String
-    Dim parts() As String
-    parts = Split(fileURL, "/")
-    GetFileNameFromURL = parts(UBound(parts))
-End Function
-
-Function WaitForFile(filePath As String, timeoutSeconds As Integer) As Boolean
-    Dim startTime As Single
-    startTime = Timer
-    Do While Dir(filePath) = ""
-        DoEvents
-        If Timer - startTime > timeoutSeconds Then
-            WaitForFile = False
-            Exit Function
-        End If
-    Loop
-    WaitForFile = True
-End Function
-
-Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
-    Dim WinHttpReq As Object
-    Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
+Sub ConvertWordToPDF(docPath As String, pdfPath As String)
     On Error GoTo ErrorHandler
+    Dim wdApp As Object, wdDoc As Object
+    Set wdApp = CreateObject("Word.Application")
+    wdApp.Visible = False
 
-    WinHttpReq.Open "GET", fileURL, False
-    WinHttpReq.Send
+    Set wdDoc = wdApp.Documents.Open(docPath, ReadOnly:=True)
+    wdDoc.ExportAsFixedFormat OutputFileName:=pdfPath, ExportFormat:=17
+    wdDoc.Close False
+    wdApp.Quit
 
-    If WinHttpReq.Status = 200 Then
-        Dim oStream As Object
-        Set oStream = CreateObject("ADODB.Stream")
-        oStream.Type = 1
-        oStream.Open
-        oStream.Write WinHttpReq.responseBody
-        oStream.SaveToFile savePath, 2
-        oStream.Close
-    End If
+    Set wdDoc = Nothing
+    Set wdApp = Nothing
     Exit Sub
 
 ErrorHandler:
-    Debug.Print "Error downloading: " & fileURL
+    MsgBox "Failed to convert Word to PDF: " & docPath
+    If Not wdApp Is Nothing Then wdApp.Quit
 End Sub
