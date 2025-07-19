@@ -1,48 +1,11 @@
-Sub DownloadFilesUsingXMLHTTP()
-    Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(1)
-
-    Dim lastRow As Long
-    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-
-    Dim lastCol As Long
-    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
-
-    Dim downloadPath As String
-    downloadPath = Environ("USERPROFILE") & "\Downloads\"
-
-    Dim i As Long
-    Dim docWebURL As String, sharepointURL As String
-    Dim docWebFile As String, sharepointFile As String
-
-    For i = 2 To lastRow
-        docWebURL = Trim(ws.Cells(i, lastCol - 1).Value)
-        sharepointURL = Trim(ws.Cells(i, lastCol).Value)
-
-        ' Download DocWeb (no extension-based)
-        If docWebURL <> "" Then
-            docWebFile = downloadPath & "DocWeb" & Format(i - 1, "00")
-            Call DownloadAndSave(docWebURL, docWebFile, True)
-        End If
-
-        ' Download SharePoint (extension-based)
-        If sharepointURL <> "" Then
-            Dim ext As String
-            ext = Mid(sharepointURL, InStrRev(sharepointURL, "."))
-            sharepointFile = downloadPath & "Sharepoint" & Format(i - 1, "00") & ext
-            Call DownloadAndSave(sharepointURL, sharepointFile, False)
-        End If
-    Next i
-
-    MsgBox "All files downloaded successfully!"
-End Sub
-
 Sub DownloadAndSave(ByVal fileURL As String, ByVal savePath As String, ByVal detectExtension As Boolean)
     Dim http As Object, stream As Object
     Dim contentType As String, fileExt As String
 
-    Set http = CreateObject("MSXML2.XMLHTTP")
+    Set http = CreateObject("MSXML2.ServerXMLHTTP")
     http.Open "GET", fileURL, False
+    
+    On Error GoTo ErrHandler
     http.Send
 
     If http.Status = 200 Then
@@ -66,4 +29,8 @@ Sub DownloadAndSave(ByVal fileURL As String, ByVal savePath As String, ByVal det
     Else
         MsgBox "Failed to download: " & fileURL & vbCrLf & "Status: " & http.Status
     End If
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Access denied or request failed for URL: " & fileURL, vbCritical
 End Sub
