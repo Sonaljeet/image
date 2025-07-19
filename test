@@ -1,6 +1,6 @@
 Sub DownloadPDFsToFolders()
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(1) ' Change if needed
+    Set ws = ThisWorkbook.Sheets(1) ' Adjust if your data is on another sheet
 
     Dim lastRow As Long, lastCol As Long
     Dim url1 As String, url2 As String
@@ -8,29 +8,30 @@ Sub DownloadPDFsToFolders()
     Dim baseFolder As String
     Dim i As Long
 
-    ' Set base download folder (you can change this)
+    ' Set base download folder (relative to workbook path)
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
 
-    ' Create base folder if not exists
+    ' Create base folder if it doesn't exist
     If Dir(baseFolder, vbDirectory) = "" Then
         MkDir baseFolder
     End If
 
-    ' Get last row and last two columns
+    ' Determine last row and column with data
     lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
 
-    For i = 2 To lastRow ' Assuming header in row 1
+    ' Loop through each row starting from row 2
+    For i = 2 To lastRow
         url1 = Trim(ws.Cells(i, lastCol - 1).Value)
         url2 = Trim(ws.Cells(i, lastCol).Value)
 
-        ' Create folder for the current row
+        ' Create a folder for each row
         rowFolderPath = baseFolder & "\Row_" & i
         If Dir(rowFolderPath, vbDirectory) = "" Then
             MkDir rowFolderPath
         End If
 
-        ' Download PDFs if URLs are valid
+        ' Download files if URLs are provided
         If url1 <> "" Then
             DownloadFile url1, rowFolderPath & "\file1.pdf"
         End If
@@ -39,15 +40,16 @@ Sub DownloadPDFsToFolders()
         End If
     Next i
 
-    MsgBox "PDF downloads completed!"
-
+    MsgBox "Download completed for all rows!"
 End Sub
 
 Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
     Dim WinHttpReq As Object
-    Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
-    
+    Set WinHttpReq = CreateObject("WinHttp.WinHttpRequest.5.1")
+
     On Error GoTo ErrorHandler
+
+    WinHttpReq.Option(6) = True ' Enable auto-redirect
     WinHttpReq.Open "GET", fileURL, False
     WinHttpReq.Send
 
@@ -56,9 +58,11 @@ Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
         Set oStream = CreateObject("ADODB.Stream")
         oStream.Type = 1 ' Binary
         oStream.Open
-        oStream.Write WinHttpReq.responseBody
-        oStream.SaveToFile savePath, 2 ' Overwrite
+        oStream.Write WinHttpReq.ResponseBody
+        oStream.SaveToFile savePath, 2 ' 2 = Overwrite
         oStream.Close
+    Else
+        Debug.Print "HTTP Status: " & WinHttpReq.Status & " for " & fileURL
     End If
 
     Exit Sub
