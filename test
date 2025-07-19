@@ -1,72 +1,45 @@
-Sub DownloadPDFsToFolders()
+Declare PtrSafe Function URLDownloadToFile Lib "urlmon" Alias "URLDownloadToFileA" ( _
+    ByVal pCaller As LongPtr, _
+    ByVal szURL As String, _
+    ByVal szFileName As String, _
+    ByVal dwReserved As LongPtr, _
+    ByVal lpfnCB As LongPtr) As Long
+
+Sub DownloadFiles()
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(1) ' Adjust if your data is on another sheet
+    Set ws = ThisWorkbook.Sheets(1) ' Adjust if needed
 
-    Dim lastRow As Long, lastCol As Long
-    Dim url1 As String, url2 As String
-    Dim rowFolderPath As String
-    Dim baseFolder As String
-    Dim i As Long
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
 
-    ' Set base download folder (relative to workbook path)
-    baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
-
-    ' Create base folder if it doesn't exist
-    If Dir(baseFolder, vbDirectory) = "" Then
-        MkDir baseFolder
-    End If
-
-    ' Determine last row and column with data
-    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    Dim lastCol As Long
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
 
-    ' Loop through each row starting from row 2
+    Dim downloadPath As String
+    downloadPath = Environ("USERPROFILE") & "\Downloads\"
+
+    Dim i As Long
+    Dim docWebURL As String, sharepointURL As String
+    Dim docWebFile As String, sharepointFile As String
+    Dim result As Long
+
     For i = 2 To lastRow
-        url1 = Trim(ws.Cells(i, lastCol - 1).Value)
-        url2 = Trim(ws.Cells(i, lastCol).Value)
+        docWebURL = Trim(ws.Cells(i, lastCol - 1).Value)
+        sharepointURL = Trim(ws.Cells(i, lastCol).Value)
 
-        ' Create a folder for each row
-        rowFolderPath = baseFolder & "\Row_" & i
-        If Dir(rowFolderPath, vbDirectory) = "" Then
-            MkDir rowFolderPath
+        If docWebURL <> "" Then
+            docWebFile = downloadPath & "DocWeb" & Format(i - 1, "00")
+            ' Assume PDF or Word, check URL or add logic to determine extension
+            docWebFile = docWebFile & IIf(InStr(docWebURL, "pdf") > 0, ".pdf", ".docx")
+            result = URLDownloadToFile(0, docWebURL, docWebFile, 0, 0)
         End If
 
-        ' Download files if URLs are provided
-        If url1 <> "" Then
-            DownloadFile url1, rowFolderPath & "\file1.pdf"
-        End If
-        If url2 <> "" Then
-            DownloadFile url2, rowFolderPath & "\file2.pdf"
+        If sharepointURL <> "" Then
+            sharepointFile = downloadPath & "Sharepoint" & Format(i - 1, "00")
+            sharepointFile = sharepointFile & Right(sharepointURL, Len(sharepointURL) - InStrRev(sharepointURL, ".") + 1)
+            result = URLDownloadToFile(0, sharepointURL, sharepointFile, 0, 0)
         End If
     Next i
 
-    MsgBox "Download completed for all rows!"
-End Sub
-
-Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
-    Dim WinHttpReq As Object
-    Set WinHttpReq = CreateObject("WinHttp.WinHttpRequest.5.1")
-
-    On Error GoTo ErrorHandler
-
-    WinHttpReq.Option(6) = True ' Enable auto-redirect
-    WinHttpReq.Open "GET", fileURL, False
-    WinHttpReq.Send
-
-    If WinHttpReq.Status = 200 Then
-        Dim oStream As Object
-        Set oStream = CreateObject("ADODB.Stream")
-        oStream.Type = 1 ' Binary
-        oStream.Open
-        oStream.Write WinHttpReq.ResponseBody
-        oStream.SaveToFile savePath, 2 ' 2 = Overwrite
-        oStream.Close
-    Else
-        Debug.Print "HTTP Status: " & WinHttpReq.Status & " for " & fileURL
-    End If
-
-    Exit Sub
-
-ErrorHandler:
-    Debug.Print "Error downloading: " & fileURL
+    MsgBox "Download complete!"
 End Sub
