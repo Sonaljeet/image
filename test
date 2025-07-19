@@ -1,109 +1,100 @@
 Sub DownloadPDFsToFolders()
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(1) ' Change if needed
+    Set ws = ThisWorkbook.Sheets(1)
 
     Dim lastRow As Long, lastCol As Long
     Dim url1 As String, url2 As String
+    Dim fileName As String
     Dim rowFolderPath As String
     Dim baseFolder As String
+    Dim downloadsPath As String
+    Dim sourcePath As String
+    Dim destPath As String
     Dim i As Long
-    Dim fileName2 As String
-    Dim latestPDF As String
 
-    ' Set base download folder
+    ' User's Downloads folder
+    downloadsPath = Environ$("USERPROFILE") & "\Downloads\"
+
+    ' Base destination folder
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
-
-    ' Create base folder if not exists
     If Dir(baseFolder, vbDirectory) = "" Then MkDir baseFolder
 
-    ' Get last row and last two columns
     lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
 
-    For i = 2 To lastRow ' Assuming header in row 1
+    For i = 2 To lastRow
         url1 = Trim(ws.Cells(i, lastCol - 1).Value)
         url2 = Trim(ws.Cells(i, lastCol).Value)
 
-        ' Create folder for the current row
         rowFolderPath = baseFolder & "\Row_" & i
         If Dir(rowFolderPath, vbDirectory) = "" Then MkDir rowFolderPath
 
-        ' === Handle URL1 - assumed to download via browser ===
+        ' === Handle URL1 ===
         If url1 <> "" Then
-            ' Open the URL in browser
-            ThisWorkbook.FollowHyperlink url1
+            fileName = GetFileNameFromURL(url1)
+            sourcePath = downloadsPath & fileName
+            destPath = rowFolderPath & "\file1.pdf"
 
-            ' Wait a few seconds for the file to download
-            Application.Wait Now + TimeValue("0:00:05") ' Adjust time if needed
+            ' Download to Downloads folder
+            DownloadFile url1, sourcePath
 
-            ' Get latest PDF from Downloads folder
-            latestPDF = GetLatestDownloadedPDF()
-            If latestPDF <> "" Then
-                FileCopy latestPDF, rowFolderPath & "\" & Dir(latestPDF)
+            ' Wait until file exists (max 10 seconds)
+            If WaitForFile(sourcePath, 10) Then
+                FileCopy sourcePath, destPath
+                ' Optionally delete original
+                ' Kill sourcePath
             Else
-                Debug.Print "No recent PDF found in Downloads."
+                MsgBox "Timeout waiting for: " & fileName
             End If
         End If
 
-        ' === Handle URL2 - download via HTTP request ===
+        ' === Handle URL2 directly into row folder ===
         If url2 <> "" Then
-            fileName2 = GetFileNameFromURL(url2)
-            DownloadFile url2, rowFolderPath & "\" & fileName2
+            DownloadFile url2, rowFolderPath & "\file2.pdf"
         End If
     Next i
 
     MsgBox "PDF downloads completed!"
 End Sub
 
-' Download file using HTTP request
+Function GetFileNameFromURL(ByVal fileURL As String) As String
+    Dim parts() As String
+    parts = Split(fileURL, "/")
+    GetFileNameFromURL = parts(UBound(parts))
+End Function
+
+Function WaitForFile(filePath As String, timeoutSeconds As Integer) As Boolean
+    Dim startTime As Single
+    startTime = Timer
+    Do While Dir(filePath) = ""
+        DoEvents
+        If Timer - startTime > timeoutSeconds Then
+            WaitForFile = False
+            Exit Function
+        End If
+    Loop
+    WaitForFile = True
+End Function
+
 Sub DownloadFile(ByVal fileURL As String, ByVal savePath As String)
     Dim WinHttpReq As Object
     Set WinHttpReq = CreateObject("Microsoft.XMLHTTP")
-    
     On Error GoTo ErrorHandler
+
     WinHttpReq.Open "GET", fileURL, False
     WinHttpReq.Send
 
     If WinHttpReq.Status = 200 Then
         Dim oStream As Object
         Set oStream = CreateObject("ADODB.Stream")
-        oStream.Type = 1 ' Binary
+        oStream.Type = 1
         oStream.Open
         oStream.Write WinHttpReq.responseBody
-        oStream.SaveToFile savePath, 2 ' Overwrite
+        oStream.SaveToFile savePath, 2
         oStream.Close
     End If
-
     Exit Sub
 
 ErrorHandler:
     Debug.Print "Error downloading: " & fileURL
 End Sub
-
-' Extract filename from URL
-Function GetFileNameFromURL(fileURL As String) As String
-    Dim parts() As String
-    parts = Split(fileURL, "/")
-    GetFileNameFromURL = parts(UBound(parts))
-End Function
-
-' Get the most recent PDF from Downloads folder
-Function GetLatestDownloadedPDF() As String
-    Dim downloadFolder As String
-    Dim fileName As String
-    Dim latestFile As String
-    Dim latestDate As Date
-
-    downloadFolder = Environ("USERPROFILE") & "\Downloads"
-    fileName = Dir(downloadFolder & "\*.pdf")
-
-    Do While fileName <> ""
-        If FileDateTime(downloadFolder & "\" & fileName) > latestDate Then
-            latestDate = FileDateTime(downloadFolder & "\" & fileName)
-            latestFile = downloadFolder & "\" & fileName
-        End If
-        fileName = Dir
-    Loop
-
-    GetLatestDownloadedPDF = latestFile
-End Function
