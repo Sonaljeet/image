@@ -1,13 +1,6 @@
-Declare PtrSafe Function URLDownloadToFile Lib "urlmon" Alias "URLDownloadToFileA" ( _
-    ByVal pCaller As LongPtr, _
-    ByVal szURL As String, _
-    ByVal szFileName As String, _
-    ByVal dwReserved As LongPtr, _
-    ByVal lpfnCB As LongPtr) As Long
-
-Sub DownloadFiles()
+Sub DownloadFilesUsingXMLHTTP()
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(1) ' Adjust if needed
+    Set ws = ThisWorkbook.Sheets(1)
 
     Dim lastRow As Long
     lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
@@ -21,25 +14,56 @@ Sub DownloadFiles()
     Dim i As Long
     Dim docWebURL As String, sharepointURL As String
     Dim docWebFile As String, sharepointFile As String
-    Dim result As Long
 
     For i = 2 To lastRow
         docWebURL = Trim(ws.Cells(i, lastCol - 1).Value)
         sharepointURL = Trim(ws.Cells(i, lastCol).Value)
 
+        ' Download DocWeb (no extension-based)
         If docWebURL <> "" Then
             docWebFile = downloadPath & "DocWeb" & Format(i - 1, "00")
-            ' Assume PDF or Word, check URL or add logic to determine extension
-            docWebFile = docWebFile & IIf(InStr(docWebURL, "pdf") > 0, ".pdf", ".docx")
-            result = URLDownloadToFile(0, docWebURL, docWebFile, 0, 0)
+            Call DownloadAndSave(docWebURL, docWebFile, True)
         End If
 
+        ' Download SharePoint (extension-based)
         If sharepointURL <> "" Then
-            sharepointFile = downloadPath & "Sharepoint" & Format(i - 1, "00")
-            sharepointFile = sharepointFile & Right(sharepointURL, Len(sharepointURL) - InStrRev(sharepointURL, ".") + 1)
-            result = URLDownloadToFile(0, sharepointURL, sharepointFile, 0, 0)
+            Dim ext As String
+            ext = Mid(sharepointURL, InStrRev(sharepointURL, "."))
+            sharepointFile = downloadPath & "Sharepoint" & Format(i - 1, "00") & ext
+            Call DownloadAndSave(sharepointURL, sharepointFile, False)
         End If
     Next i
 
-    MsgBox "Download complete!"
+    MsgBox "All files downloaded successfully!"
+End Sub
+
+Sub DownloadAndSave(ByVal fileURL As String, ByVal savePath As String, ByVal detectExtension As Boolean)
+    Dim http As Object, stream As Object
+    Dim contentType As String, fileExt As String
+
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    http.Open "GET", fileURL, False
+    http.Send
+
+    If http.Status = 200 Then
+        If detectExtension Then
+            contentType = LCase(http.getResponseHeader("Content-Type"))
+            Select Case contentType
+                Case "application/pdf": fileExt = ".pdf"
+                Case "application/vnd.openxmlformats-officedocument.wordprocessingml.document": fileExt = ".docx"
+                Case "application/msword": fileExt = ".doc"
+                Case Else: fileExt = ".bin"
+            End Select
+            savePath = savePath & fileExt
+        End If
+
+        Set stream = CreateObject("ADODB.Stream")
+        stream.Type = 1 'binary
+        stream.Open
+        stream.Write http.responseBody
+        stream.SaveToFile savePath, 2 'overwrite
+        stream.Close
+    Else
+        MsgBox "Failed to download: " & fileURL & vbCrLf & "Status: " & http.Status
+    End If
 End Sub
