@@ -1,15 +1,15 @@
-Sub DownloadFilesToFolders()
+Sub MoveLatestDownloadedFilesToRowFolders()
     Dim ws As Worksheet
     Set ws = ThisWorkbook.Sheets(1)
 
     Dim lastRow As Long, lastCol As Long
-    Dim url1 As String, url2 As String
-    Dim fileExt As String
-    Dim rowFolderPath As String
-    Dim baseFolder As String
-    Dim destPath As String
+    Dim rowFolderPath As String, baseFolder As String
+    Dim downloadsPath As String
+    Dim latestFile As String, fileExt As String
+    Dim sourcePath As String, destPath As String
     Dim i As Long
 
+    downloadsPath = Environ$("USERPROFILE") & "\Downloads\"
     baseFolder = ThisWorkbook.Path & "\PDF_Downloads"
     If Dir(baseFolder, vbDirectory) = "" Then MkDir baseFolder
 
@@ -17,38 +17,82 @@ Sub DownloadFilesToFolders()
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
 
     For i = 2 To lastRow
-        url1 = Trim(ws.Cells(i, lastCol - 1).Value)
-        url2 = Trim(ws.Cells(i, lastCol).Value)
-
         rowFolderPath = baseFolder & "\Row_" & i
         If Dir(rowFolderPath, vbDirectory) = "" Then MkDir rowFolderPath
 
-        ' Download and process url1
-        If url1 <> "" Then
-            fileExt = GetExtensionFromURLResponse(url1)
-            If fileExt = "" Then fileExt = ".bin"
-            destPath = rowFolderPath & "\file1" & fileExt
-            DownloadFile url1, destPath
-            If LCase(fileExt) = ".doc" Or LCase(fileExt) = ".docx" Then
-                ConvertWordToPDF destPath, Replace(destPath, fileExt, ".pdf")
-                Kill destPath ' Delete Word file after conversion
-            End If
+        ' Wait for a new file to appear in Downloads (20 seconds timeout)
+        latestFile = WaitForLatestFile(downloadsPath, 20)
+        If latestFile = "" Then
+            MsgBox "No new file found in Downloads for Row " & i, vbExclamation
+            GoTo ContinueLoop
         End If
 
-        ' Download and process url2
-        If url2 <> "" Then
-            fileExt = GetFileExtensionFromURL(url2)
-            destPath = rowFolderPath & "\file2" & fileExt
-            DownloadFile url2, destPath
-            If LCase(fileExt) = ".doc" Or LCase(fileExt) = ".docx" Then
-                ConvertWordToPDF destPath, Replace(destPath, fileExt, ".pdf")
-                Kill destPath ' Delete Word file after conversion
-            End If
+        sourcePath = downloadsPath & latestFile
+        fileExt = GetFileExtension(latestFile)
+        destPath = rowFolderPath & "\file1" & fileExt
+
+        ' Copy file from Downloads to Row_i folder
+        FileCopy sourcePath, destPath
+
+        ' Optional: delete original from Downloads after copy
+        ' Kill sourcePath
+
+        ' Convert Word docs to PDF and delete original Word file
+        If LCase(fileExt) = ".doc" Or LCase(fileExt) = ".docx" Then
+            ConvertWordToPDF destPath, Replace(destPath, fileExt, ".pdf")
+            Kill destPath
         End If
+
+ContinueLoop:
     Next i
 
-    MsgBox "Download and conversion completed!"
+    MsgBox "Files moved and converted where needed!"
 End Sub
+
+' Waits for a file to appear in the folder and returns the newest file name or "" if timeout
+Function WaitForLatestFile(folderPath As String, timeoutSeconds As Integer) As String
+    Dim startTime As Single
+    Dim fso As Object
+    Dim folder As Object
+    Dim file As Object
+    Dim latestFileName As String
+    Dim latestDate As Date
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set folder = fso.GetFolder(folderPath)
+
+    startTime = Timer
+    Do
+        latestDate = #1/1/1900#
+        latestFileName = ""
+
+        For Each file In folder.Files
+            If file.DateLastModified > latestDate Then
+                latestDate = file.DateLastModified
+                latestFileName = file.Name
+            End If
+        Next
+
+        If latestFileName <> "" Then
+            WaitForLatestFile = latestFileName
+            Exit Function
+        End If
+
+        DoEvents
+        If Timer - startTime > timeoutSeconds Then Exit Do
+        Application.Wait Now + TimeValue("0:00:01") ' Wait 1 second
+    Loop
+
+    WaitForLatestFile = ""
+End Function
+
+Function GetFileExtension(fileName As String) As String
+    If InStrRev(fileName, ".") > 0 Then
+        GetFileExtension = Mid(fileName, InStrRev(fileName, "."))
+    Else
+        GetFileExtension = ""
+    End If
+End Function
 
 Sub ConvertWordToPDF(docPath As String, pdfPath As String)
     On Error GoTo ErrorHandler
@@ -66,6 +110,6 @@ Sub ConvertWordToPDF(docPath As String, pdfPath As String)
     Exit Sub
 
 ErrorHandler:
-    MsgBox "Failed to convert Word to PDF: " & docPath
+    MsgBox "Error converting Word to PDF: " & docPath
     If Not wdApp Is Nothing Then wdApp.Quit
 End Sub
