@@ -1,88 +1,22 @@
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+private static URI encodeUrl(String url) throws Exception {
+    URI rawUri = new URI(url);
 
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+    URIBuilder builder = new URIBuilder()
+            .setScheme(rawUri.getScheme())
+            .setHost(rawUri.getHost())
+            .setPath(rawUri.getPath());
 
-public class FileDownloaderFromExcel {
-
-    private static final String DOWNLOAD_PATH = System.getProperty("user.home") + "/Downloads/";
-
-    public static void main(String[] args) throws Exception {
-        String excelPath = "path_to_your_excel_file.xlsx";
-        FileInputStream fis = new FileInputStream(excelPath);
-
-        Workbook workbook = new XSSFWorkbook(fis);
-        Sheet sheet = workbook.getSheetAt(0);
-        int lastRow = sheet.getLastRowNum();
-
-        for (int i = 1; i <= lastRow; i++) {
-            Row row = sheet.getRow(i);
-            if (row == null) continue;
-
-            int lastCol = row.getLastCellNum();
-            String docWebUrl = getCellValue(row.getCell(lastCol - 2));
-            String sharepointUrl = getCellValue(row.getCell(lastCol - 1));
-
-            if (!docWebUrl.isEmpty()) {
-                String docWebFile = DOWNLOAD_PATH + "DocWeb" + String.format("%02d", i) + detectExtension(docWebUrl, true);
-                downloadFileWithHeaders(docWebUrl, docWebFile);
-            }
-
-            if (!sharepointUrl.isEmpty()) {
-                String sharepointFile = DOWNLOAD_PATH + "Sharepoint" + String.format("%02d", i) + detectExtension(sharepointUrl, false);
-                downloadFileWithHeaders(sharepointUrl, sharepointFile);
+    // Parse query if it exists
+    String query = rawUri.getRawQuery();
+    if (query != null) {
+        String[] params = query.split("&");
+        for (String param : params) {
+            String[] pair = param.split("=");
+            if (pair.length == 2) {
+                builder.addParameter(pair[0], pair[1]);
             }
         }
-
-        workbook.close();
-        fis.close();
-        System.out.println("Download complete.");
     }
 
-    private static String getCellValue(Cell cell) {
-        if (cell == null) return "";
-        return cell.getCellType() == CellType.STRING ? cell.getStringCellValue().trim() : "";
-    }
-
-    private static void downloadFileWithHeaders(String fileURL, String savePath) {
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpGet request = new HttpGet(fileURL);
-
-            // Add required headers (copy from browser DevTools)
-            request.addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-            request.addHeader("Cookie", "FedAuth=XYZ; rtFa=ABC"); // <-- Replace with your real cookie
-
-            HttpResponse response = client.execute(request);
-
-            if (response.getCode() == 200) {
-                InputStream in = response.getEntity().getContent();
-                Files.copy(in, Paths.get(savePath));
-                in.close();
-                System.out.println("Downloaded: " + savePath);
-            } else {
-                System.err.println("Failed to download: " + fileURL + " (Status: " + response.getCode() + ")");
-            }
-        } catch (Exception e) {
-            System.err.println("Error downloading from: " + fileURL);
-            e.printStackTrace();
-        }
-    }
-
-    private static String detectExtension(String url, boolean isDocWeb) {
-        if (!isDocWeb) {
-            // SharePoint URL ends with .pdf or .docx
-            int dot = url.lastIndexOf('.');
-            return (dot > 0) ? url.substring(dot) : ".bin";
-        } else {
-            // Default to PDF or Word for DocWeb, optionally enhance via Content-Type
-            if (url.toLowerCase().contains("pdf")) return ".pdf";
-            return ".docx"; // fallback
-        }
-    }
+    return builder.build();
 }
