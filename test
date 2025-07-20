@@ -1,22 +1,128 @@
-private static URI encodeUrl(String url) throws Exception {
-    URI rawUri = new URI(url);
+   public void compareOcrFromTwoPdfs(MultipartFile pdf1, MultipartFile pdf2) throws Exception {
+        try (PDDocument doc1 = PDDocument.load(pdf1.getInputStream());
+             PDDocument doc2 = PDDocument.load(pdf2.getInputStream())) {
 
-    URIBuilder builder = new URIBuilder()
-            .setScheme(rawUri.getScheme())
-            .setHost(rawUri.getHost())
-            .setPath(rawUri.getPath());
+            int pageCount = Math.min(doc1.getNumberOfPages(), doc2.getNumberOfPages());
 
-    // Parse query if it exists
-    String query = rawUri.getRawQuery();
-    if (query != null) {
-        String[] params = query.split("&");
-        for (String param : params) {
-            String[] pair = param.split("=");
-            if (pair.length == 2) {
-                builder.addParameter(pair[0], pair[1]);
+            PDFRenderer renderer1 = new PDFRenderer(doc1);
+            PDFRenderer renderer2 = new PDFRenderer(doc2);
+
+            Tesseract tesseract = new Tesseract();
+            tesseract.setDatapath(LoadLibs.extractTessResources("tessdata").getAbsolutePath());
+            tesseract.setLanguage("eng");
+            tesseract.setPageSegMode(6);
+
+            for (int pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+                BufferedImage image1 = toGrayscale(renderer1.renderImageWithDPI(pageIndex, 300));
+                BufferedImage image2 = toGrayscale(renderer2.renderImageWithDPI(pageIndex, 300));
+
+                List<Word> words1 = tesseract.getWords(image1, ITessAPI.TessPageIteratorLevel.RIL_WORD);
+                List<Word> words2 = tesseract.getWords(image2, ITessAPI.TessPageIteratorLevel.RIL_WORD);
+
+                Set<String> normalizedWords2 = normalizedWord(words2);
+                // Create image to draw over PDF1
+                createImageForMismatch(image1, words1, normalizedWords2, pageIndex, "PDF1");
+                // Create image to draw over PDF2
+                Set<String> normalizedWords1 = normalizedWord(words1);
+                createImageForMismatch(image2, words2, normalizedWords1, pageIndex, "PDF2");
+                mergeImage("ocr_diff_page_PDF1_" + (pageIndex + 1) + ".png", "ocr_diff_page_PDF2_" + (pageIndex + 1) + ".png", pageIndex);
             }
         }
+
     }
 
-    return builder.build();
-}
+    private BufferedImage toGrayscale(BufferedImage original) {
+        BufferedImage gray = new BufferedImage(original.getWidth(), original.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
+        Graphics2D g = gray.createGraphics();
+        g.drawImage(original, 0, 0, null);
+        g.dispose();
+        return gray;
+    }
+
+
+    private Set<String> normalizedWord(List<Word> words) {
+        return words.stream()
+                .map(w -> normalizeText(w.getText()))
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
+    }
+
+    private void createImageForMismatch(BufferedImage image, List<Word> words, Set<String> normalizedWords, int pageIndex, String filePartialName) throws IOException {
+        BufferedImage output = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = output.createGraphics();
+        g.drawImage(image, 0, 0, null);
+        g.setColor(Color.RED);
+        g.setStroke(new BasicStroke(2));
+
+        for (Word word : words) {
+            String ocrWord1 = normalizeText(word.getText());
+            if (ocrWord1.isEmpty()) continue;
+
+            boolean matchFound = normalizedWords.stream()
+                    .anyMatch(w2 -> similarity(w2, ocrWord1) >= 0.85);
+
+            if (!matchFound) {
+                Rectangle rect = word.getBoundingBox();
+                g.drawRect(rect.x, rect.y, rect.width, rect.height);
+                String fileName = "ocr_diff_page_" + filePartialName + "_" + (pageIndex + 1) + ".png";
+                ImageIO.write(output, "png", new File(fileName));
+            }
+        }
+        g.dispose();
+    }
+
+    private String normalizeText(String input) {
+        if (input == null) return "";
+        return input
+                .replaceAll("[^\\p{L}\\p{Nd}]", "")  // keep only letters and digits
+                .toLowerCase()
+                .trim();
+    }
+
+    private double similarity(String s1, String s2) {
+        if (s1 == null || s2 == null) return 0.0;
+        int maxLength = Math.max(s1.length(), s2.length());
+        if (maxLength == 0) return 1.0;
+        int distance = levenshteinDistance(s1, s2);
+        return (1.0 - (double) distance / maxLength);
+    }
+
+    private int levenshteinDistance(String s1, String s2) {
+        int[][] dp = new int[s1.length() + 1][s2.length() + 1];
+        for (int i = 0; i <= s1.length(); i++) {
+            for (int j = 0; j <= s2.length(); j++) {
+                if (i == 0) dp[i][j] = j;
+                else if (j == 0) dp[i][j] = i;
+                else dp[i][j] = s1.charAt(i - 1) == s2.charAt(j - 1)
+                            ? dp[i - 1][j - 1]
+                            : 1 + Math.min(Math.min(dp[i - 1][j], dp[i][j - 1]), dp[i - 1][j - 1]);
+            }
+        }
+        return dp[s1.length()][s2.length()];
+    }
+
+    private void mergeImage(String imageFile1, String imageFile2, int pageIndex) throws IOException {
+        File file1 = new File(imageFile1);
+        File file2 = new File(imageFile2);
+        if (file1.exists() && file2.exists()) {
+            BufferedImage image1 = ImageIO.read(file1);
+            BufferedImage image2 = ImageIO.read(file2);
+            // Calculate dimensions for the combined image
+            int width = image1.getWidth() + image2.getWidth();
+            int height = Math.max(image1.getHeight(), image2.getHeight());
+
+            // Create a new image with the calculated dimensions and type
+            BufferedImage mergedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+
+            // Draw both images side-by-side
+            Graphics2D g2d = mergedImage.createGraphics();
+            g2d.drawImage(image1, 0, 0, null); // Draw first image at (0, 0)
+            g2d.drawImage(image2, image1.getWidth(), 0, null); // Draw second image next to the first
+            g2d.dispose();
+
+            // Save the merged image
+            ImageIO.write(mergedImage, "png", new File("diff_page_" + (pageIndex + 1) + ".png"));
+            file1.delete();
+            file2.delete();
+        }
+    }
