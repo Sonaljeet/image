@@ -1,0 +1,31 @@
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-maven-plugin</artifactId>
+            <version>3.2.0</version> <!-- Use your Spring Boot version -->
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>repackage</goal>
+                    </goals>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
+
+mvn clean package
+
+mvn install:install-file \
+  -Dfile=target/my-spring-boot-app-1.0.0.jar \
+  -DgroupId=com.example \
+  -DartifactId=my-spring-boot-app \
+  -Dversion=1.0.0 \
+  -Dpackaging=jar
+
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>my-spring-boot-app</artifactId>
+    <version>1.0.0</version>
+</dependency>
