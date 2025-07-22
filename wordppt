@@ -1,0 +1,95 @@
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.List;
+
+public class WordComparator {
+    public static void main(String[] args) throws IOException {
+        String path1 = "doc1.docx";
+        String path2 = "doc2.docx";
+
+        try (XWPFDocument doc1 = new XWPFDocument(new FileInputStream(path1));
+             XWPFDocument doc2 = new XWPFDocument(new FileInputStream(path2))) {
+
+            List<XWPFParagraph> paragraphs1 = doc1.getParagraphs();
+            List<XWPFParagraph> paragraphs2 = doc2.getParagraphs();
+
+            boolean isEqual = true;
+            int max = Math.max(paragraphs1.size(), paragraphs2.size());
+
+            for (int i = 0; i < max; i++) {
+                String text1 = i < paragraphs1.size() ? paragraphs1.get(i).getText() : "";
+                String text2 = i < paragraphs2.size() ? paragraphs2.get(i).getText() : "";
+
+                if (!text1.equals(text2)) {
+                    System.out.println("Difference at paragraph " + (i + 1));
+                    System.out.println("Doc1: " + text1);
+                    System.out.println("Doc2: " + text2);
+                    isEqual = false;
+                }
+            }
+
+            if (isEqual) {
+                System.out.println("Documents are identical.");
+            } else {
+                System.out.println("Documents are different.");
+            }
+        }
+    }
+}
+
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFShape;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextShape;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.List;
+
+public class PowerPointComparator {
+    public static void main(String[] args) throws IOException {
+        String path1 = "presentation1.pptx";
+        String path2 = "presentation2.pptx";
+
+        try (XMLSlideShow ppt1 = new XMLSlideShow(new FileInputStream(path1));
+             XMLSlideShow ppt2 = new XMLSlideShow(new FileInputStream(path2))) {
+
+            List<XSLFSlide> slides1 = ppt1.getSlides();
+            List<XSLFSlide> slides2 = ppt2.getSlides();
+
+            boolean isEqual = true;
+            int max = Math.max(slides1.size(), slides2.size());
+
+            for (int i = 0; i < max; i++) {
+                String text1 = i < slides1.size() ? getSlideText(slides1.get(i)) : "";
+                String text2 = i < slides2.size() ? getSlideText(slides2.get(i)) : "";
+
+                if (!text1.equals(text2)) {
+                    System.out.println("Difference at slide " + (i + 1));
+                    System.out.println("PPT1: " + text1);
+                    System.out.println("PPT2: " + text2);
+                    isEqual = false;
+                }
+            }
+
+            if (isEqual) {
+                System.out.println("Presentations are identical.");
+            } else {
+                System.out.println("Presentations are different.");
+            }
+        }
+    }
+
+    private static String getSlideText(XSLFSlide slide) {
+        StringBuilder text = new StringBuilder();
+        for (XSLFShape shape : slide.getShapes()) {
+            if (shape instanceof XSLFTextShape) {
+                text.append(((XSLFTextShape) shape).getText()).append("\n");
+            }
+        }
+        return text.toString().trim();
+    }
+}
