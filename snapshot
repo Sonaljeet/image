@@ -1,67 +1,125 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <title>Full Snapshot Utility</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <title>Screen Capture with Selection</title>
+    <style>
+        #canvas {
+            border: 1px solid #ccc;
+            cursor: crosshair;
+        }
+    </style>
 </head>
 <body>
 <button id="captureScreen">Capture Screen</button>
+<canvas id="canvas" style="display:none;"></canvas>
 
 <script>
-    // Screen capture using getDisplayMedia
-    document.getElementById("captureScreen").addEventListener("click", async () => {
+    const captureBtn = document.getElementById("captureScreen");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    let imgBitmap = null; // store ImageBitmap from grabFrame for drawImage cropping
+    let isDragging = false;
+    let startX, startY;
+    let selection = null;
+
+    captureBtn.onclick = async () => {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             const track = stream.getVideoTracks()[0];
             const imageCapture = new ImageCapture(track);
             const bitmap = await imageCapture.grabFrame();
 
-            const canvas = document.createElement("canvas");
+            // Save bitmap and set canvas size
+            imgBitmap = bitmap;
             canvas.width = bitmap.width;
             canvas.height = bitmap.height;
-            const context = canvas.getContext("2d");
-            context.drawImage(bitmap, 0, 0);
 
-            const link = document.createElement("a");
-            link.download = "screen_snapshot.png";
-            link.href = canvas.toDataURL("image/png");
-            link.click();
+            // Draw captured image
+            ctx.drawImage(bitmap, 0, 0);
+            canvas.style.display = "block";
+            captureBtn.style.display = "none";
 
             track.stop();
         } catch (err) {
             console.error("Error capturing screen:", err);
             alert("Screen capture failed.");
         }
-    });
+    };
+
+    canvas.onmousedown = e => {
+        const rect = canvas.getBoundingClientRect();
+        startX = e.clientX - rect.left;
+        startY = e.clientY - rect.top;
+        selection = { x: startX, y: startY, w: 0, h: 0 };
+        isDragging = true;
+    };
+
+    canvas.onmousemove = e => {
+        if (!isDragging) return;
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        selection.w = mouseX - startX;
+        selection.h = mouseY - startY;
+
+        // Redraw full image
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(imgBitmap, 0, 0);
+
+        // Draw selection rectangle
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
+    };
+
+    canvas.onmouseup = e => {
+        if (!isDragging) return;
+        isDragging = false;
+
+        // Normalize coordinates
+        let sx = selection.x;
+        let sy = selection.y;
+        let sw = selection.w;
+        let sh = selection.h;
+
+        if (sw < 0) {
+            sx += sw;
+            sw = Math.abs(sw);
+        }
+        if (sh < 0) {
+            sy += sh;
+            sh = Math.abs(sh);
+        }
+
+        if (sw === 0 || sh === 0) {
+            alert("Please select a valid area.");
+            return;
+        }
+
+        // Create cropped canvas
+        const cropCanvas = document.createElement("canvas");
+        cropCanvas.width = sw;
+        cropCanvas.height = sh;
+        const cropCtx = cropCanvas.getContext("2d");
+
+        // Crop using drawImage on bitmap - this works correctly with any coordinates
+        cropCtx.drawImage(imgBitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // Download cropped image
+        const link = document.createElement("a");
+        link.download = "selected_area.png";
+        link.href = cropCanvas.toDataURL("image/png");
+        link.click();
+
+        // Cleanup
+        canvas.style.display = "none";
+        captureBtn.style.display = "inline-block";
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        selection = null;
+        imgBitmap = null;
+    };
 </script>
 </body>
 </html>
-
-package com.snapshot.controller;
-
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
-@RestController
-public class SnapshotController {
-
-    @PostMapping("/upload-snapshot")
-    public ResponseEntity<String> uploadSnapshot(@RequestParam("image") MultipartFile image) {
-        try {
-            String filename = "snapshot_" + System.currentTimeMillis() + ".png";
-            Path path = Paths.get("uploads", filename);
-            Files.createDirectories(path.getParent());
-            Files.write(path, image.getBytes());
-            return ResponseEntity.ok("Saved as: " + filename);
-        } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Upload failed");
-        }
-    }
-}
