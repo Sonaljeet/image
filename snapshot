@@ -1,0 +1,67 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Full Snapshot Utility</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+<button id="captureScreen">Capture Screen</button>
+
+<script>
+    // Screen capture using getDisplayMedia
+    document.getElementById("captureScreen").addEventListener("click", async () => {
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const track = stream.getVideoTracks()[0];
+            const imageCapture = new ImageCapture(track);
+            const bitmap = await imageCapture.grabFrame();
+
+            const canvas = document.createElement("canvas");
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+            const context = canvas.getContext("2d");
+            context.drawImage(bitmap, 0, 0);
+
+            const link = document.createElement("a");
+            link.download = "screen_snapshot.png";
+            link.href = canvas.toDataURL("image/png");
+            link.click();
+
+            track.stop();
+        } catch (err) {
+            console.error("Error capturing screen:", err);
+            alert("Screen capture failed.");
+        }
+    });
+</script>
+</body>
+</html>
+
+package com.snapshot.controller;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+@RestController
+public class SnapshotController {
+
+    @PostMapping("/upload-snapshot")
+    public ResponseEntity<String> uploadSnapshot(@RequestParam("image") MultipartFile image) {
+        try {
+            String filename = "snapshot_" + System.currentTimeMillis() + ".png";
+            Path path = Paths.get("uploads", filename);
+            Files.createDirectories(path.getParent());
+            Files.write(path, image.getBytes());
+            return ResponseEntity.ok("Saved as: " + filename);
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Upload failed");
+        }
+    }
+}
