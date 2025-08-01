@@ -10,8 +10,8 @@
     </style>
 </head>
 <body>
-<button id="captureScreen">Capture Screen</button>
-<canvas id="canvas" style="display:none;"></canvas>
+<button id="captureScreen" type="button">Capture Screen</button>
+        <canvas id="canvas" style="display:none; border:1px solid #ccc;"></canvas>
 
 <script>
     const captureBtn = document.getElementById("captureScreen");
