@@ -1,128 +1,212 @@
-   public void compareOcrFromTwoPdfs(MultipartFile pdf1, MultipartFile pdf2) throws Exception {
-        try (PDDocument doc1 = PDDocument.load(pdf1.getInputStream());
-             PDDocument doc2 = PDDocument.load(pdf2.getInputStream())) {
+import json
+import os
+from urllib.parse import urlparse, parse_qs
+import yaml
 
-            int pageCount = Math.min(doc1.getNumberOfPages(), doc2.getNumberOfPages());
 
-            PDFRenderer renderer1 = new PDFRenderer(doc1);
-            PDFRenderer renderer2 = new PDFRenderer(doc2);
+def extract_apis_from_har(har_file):
+    """
+    Parse HAR file and extract all unique APIs with redirects, referrers, and pagination params.
+    """
+    with open(har_file, "r", encoding="utf-8") as f:
+        har_data = json.load(f)
 
-            Tesseract tesseract = new Tesseract();
-            tesseract.setDatapath(LoadLibs.extractTessResources("tessdata").getAbsolutePath());
-            tesseract.setLanguage("eng");
-            tesseract.setPageSegMode(6);
+    api_data = {}
 
-            for (int pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-                BufferedImage image1 = toGrayscale(renderer1.renderImageWithDPI(pageIndex, 300));
-                BufferedImage image2 = toGrayscale(renderer2.renderImageWithDPI(pageIndex, 300));
+    for entry in har_data["log"]["entries"]:
+        req = entry["request"]
+        resp = entry.get("response", {})
+        url = req["url"]
+        parsed = urlparse(url)
 
-                List<Word> words1 = tesseract.getWords(image1, ITessAPI.TessPageIteratorLevel.RIL_WORD);
-                List<Word> words2 = tesseract.getWords(image2, ITessAPI.TessPageIteratorLevel.RIL_WORD);
+        domain = parsed.netloc
+        path = parsed.path or "/"
+        method = req["method"]
+        query_params = list(parse_qs(parsed.query).keys())
+        referrer = next((h["value"] for h in req["headers"] if h["name"].lower() == "referer"), None)
+        redirect_to = None
 
-                Set<String> normalizedWords2 = normalizedWord(words2);
-                // Create image to draw over PDF1
-                createImageForMismatch(image1, words1, normalizedWords2, pageIndex, "PDF1");
-                // Create image to draw over PDF2
-                Set<String> normalizedWords1 = normalizedWord(words1);
-                createImageForMismatch(image2, words2, normalizedWords1, pageIndex, "PDF2");
-                mergeImage("ocr_diff_page_PDF1_" + (pageIndex + 1) + ".png", "ocr_diff_page_PDF2_" + (pageIndex + 1) + ".png", pageIndex);
+        # detect redirect target if exists
+        if 300 <= resp.get("status", 0) < 400:
+            for header in resp.get("headers", []):
+                if header["name"].lower() == "location":
+                    redirect_to = header["value"]
+
+        key = (domain, method, path)
+        if key not in api_data:
+            api_data[key] = {
+                "domain": domain,
+                "method": method,
+                "path": path,
+                "query_params": set(query_params),
+                "request_bodies": [],
+                "referrer": referrer,
+                "redirect_to": redirect_to,
             }
+
+        # Add request body if exists
+        if req.get("postData", {}).get("text"):
+            api_data[key]["request_bodies"].append(req["postData"]["text"])
+
+        # Merge query params
+        api_data[key]["query_params"].update(query_params)
+
+        # Update redirect if found
+        if redirect_to:
+            api_data[key]["redirect_to"] = redirect_to
+
+    # Auto-detect pagination parameters
+    pagination_params = {"page", "limit", "offset", "per_page", "size"}
+    for k, v in api_data.items():
+        detected = set(p for p in v["query_params"] if p.lower() in pagination_params)
+        if detected:
+            v["pagination_params"] = detected
+
+    return api_data
+
+
+def generate_openapi(api_data, output_dir="output", prefix="extracted_api"):
+    """
+    Generate OpenAPI YAMLs from extracted API data.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    openapi = {
+        "openapi": "3.0.0",
+        "info": {"title": "Extracted APIs", "version": "1.0.0"},
+        "paths": {},
+    }
+
+    for (domain, method, path), data in api_data.items():
+        op = {
+            "summary": f"Auto-extracted {method.upper()} {path}",
+            "parameters": [],
+            "responses": {"200": {"description": "Successful response"}},
         }
 
-    }
-
-    private BufferedImage toGrayscale(BufferedImage original) {
-        BufferedImage gray = new BufferedImage(original.getWidth(), original.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
-        Graphics2D g = gray.createGraphics();
-        g.drawImage(original, 0, 0, null);
-        g.dispose();
-        return gray;
-    }
-
-
-    private Set<String> normalizedWord(List<Word> words) {
-        return words.stream()
-                .map(w -> normalizeText(w.getText()))
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toSet());
-    }
-
-    private void createImageForMismatch(BufferedImage image, List<Word> words, Set<String> normalizedWords, int pageIndex, String filePartialName) throws IOException {
-        BufferedImage output = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = output.createGraphics();
-        g.drawImage(image, 0, 0, null);
-        g.setColor(Color.RED);
-        g.setStroke(new BasicStroke(2));
-
-        for (Word word : words) {
-            String ocrWord1 = normalizeText(word.getText());
-            if (ocrWord1.isEmpty()) continue;
-
-            boolean matchFound = normalizedWords.stream()
-                    .anyMatch(w2 -> similarity(w2, ocrWord1) >= 0.85);
-
-            if (!matchFound) {
-                Rectangle rect = word.getBoundingBox();
-                g.drawRect(rect.x, rect.y, rect.width, rect.height);
-                String fileName = "ocr_diff_page_" + filePartialName + "_" + (pageIndex + 1) + ".png";
-                ImageIO.write(output, "png", new File(fileName));
+        for qp in data["query_params"]:
+            param = {
+                "name": qp,
+                "in": "query",
+                "required": False,
+                "schema": {"type": "string"},
             }
-        }
-        g.dispose();
-    }
+            if "pagination_params" in data and qp in data["pagination_params"]:
+                param["description"] = "Pagination parameter"
+                param["schema"]["type"] = "integer"
+            op["parameters"].append(param)
 
-    private String normalizeText(String input) {
-        if (input == null) return "";
-        return input
-                .replaceAll("[^\\p{L}\\p{Nd}]", "")  // keep only letters and digits
-                .toLowerCase()
-                .trim();
-    }
+        openapi["paths"].setdefault(path, {})[method.lower()] = op
 
-    private double similarity(String s1, String s2) {
-        if (s1 == null || s2 == null) return 0.0;
-        int maxLength = Math.max(s1.length(), s2.length());
-        if (maxLength == 0) return 1.0;
-        int distance = levenshteinDistance(s1, s2);
-        return (1.0 - (double) distance / maxLength);
-    }
+    output_file = os.path.join(output_dir, f"{prefix}_combined.yaml")
+    with open(output_file, "w", encoding="utf-8") as f:
+        yaml.dump(openapi, f, sort_keys=False)
+    print(f"✅ OpenAPI generated: {output_file}")
 
-    private int levenshteinDistance(String s1, String s2) {
-        int[][] dp = new int[s1.length() + 1][s2.length() + 1];
-        for (int i = 0; i <= s1.length(); i++) {
-            for (int j = 0; j <= s2.length(); j++) {
-                if (i == 0) dp[i][j] = j;
-                else if (j == 0) dp[i][j] = i;
-                else dp[i][j] = s1.charAt(i - 1) == s2.charAt(j - 1)
-                            ? dp[i - 1][j - 1]
-                            : 1 + Math.min(Math.min(dp[i - 1][j], dp[i][j - 1]), dp[i - 1][j - 1]);
-            }
-        }
-        return dp[s1.length()][s2.length()];
-    }
 
-    private void mergeImage(String imageFile1, String imageFile2, int pageIndex) throws IOException {
-        File file1 = new File(imageFile1);
-        File file2 = new File(imageFile2);
-        if (file1.exists() && file2.exists()) {
-            BufferedImage image1 = ImageIO.read(file1);
-            BufferedImage image2 = ImageIO.read(file2);
-            // Calculate dimensions for the combined image
-            int width = image1.getWidth() + image2.getWidth();
-            int height = Math.max(image1.getHeight(), image2.getHeight());
+def generate_karate_features(api_data, output_dir="output", prefix="extracted_api"):
+    """
+    Generate Karate feature files with redirect & pagination support.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    combined_file = os.path.join(output_dir, f"{prefix}_combined.feature")
 
-            // Create a new image with the calculated dimensions and type
-            BufferedImage mergedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+    with open(combined_file, "w", encoding="utf-8") as f_combined:
+        f_combined.write("Feature: Extracted API Scenarios (auto-generated from HAR)\n\n")
 
-            // Draw both images side-by-side
-            Graphics2D g2d = mergedImage.createGraphics();
-            g2d.drawImage(image1, 0, 0, null); // Draw first image at (0, 0)
-            g2d.drawImage(image2, image1.getWidth(), 0, null); // Draw second image next to the first
-            g2d.dispose();
+        domains = {}
+        for (domain, method, path), data in api_data.items():
+            domains.setdefault(domain, []).append((method, path, data))
 
-            // Save the merged image
-            ImageIO.write(mergedImage, "png", new File("diff_page_" + (pageIndex + 1) + ".png"));
-            file1.delete();
-            file2.delete();
-        }
-    }
+        for domain, apis in domains.items():
+            f_combined.write(f"  # Domain: {domain}\n")
+            f_combined.write("  Background:\n")
+            f_combined.write(f"    * url 'https://{domain}'\n\n")
+
+            domain_file = os.path.join(output_dir, f"{prefix}_{domain.replace(':', '_')}.feature")
+            with open(domain_file, "w", encoding="utf-8") as f_domain:
+                f_domain.write(f"Feature: API Scenarios for {domain}\n\n")
+                f_domain.write("  Background:\n")
+                f_domain.write(f"    * url 'https://{domain}'\n\n")
+
+                for method, path, data in apis:
+                    scenario = f"  Scenario: {method.upper()} {path}\n"
+                    scenario += f"    # Method: {method.upper()}\n"
+                    if data.get("referrer"):
+                        scenario += f"    # Referrer: {data['referrer']}\n"
+                    if data.get("redirect_to"):
+                        scenario += f"    # Redirects to: {data['redirect_to']}\n"
+
+                    scenario += f"    Given path '{path.strip('/')}'\n"
+
+                    if data["query_params"]:
+                        scenario += "    And params { " + ", ".join(
+                            [f"{p}: '<value>'" for p in data["query_params"]]
+                        ) + " }\n"
+
+                    if data["request_bodies"]:
+                        try:
+                            sample = json.loads(data["request_bodies"][0])
+                            pretty_body = json.dumps(sample, indent=4)
+                            scenario += "    And request " + pretty_body.replace("\n", "\n    ") + "\n"
+                        except Exception:
+                            scenario += "    And request { }\n"
+
+                    scenario += f"    When method {method.upper()}\n"
+                    scenario += "    Then status 200\n"
+                    scenario += "    And match response != null\n"
+
+                    # Multi-hop redirect following (up to 3)
+                    hops = []
+                    next_redirect = data.get("redirect_to")
+                    visited = set()
+                    while next_redirect and len(hops) < 3 and next_redirect not in visited:
+                        visited.add(next_redirect)
+                        hops.append(next_redirect)
+                        # Try to find next hop if it also exists in api_data
+                        for (d2, m2, p2), v2 in api_data.items():
+                            full_url = f"https://{d2}{p2}"
+                            if full_url == next_redirect:
+                                next_redirect = v2.get("redirect_to")
+                                break
+                        else:
+                            next_redirect = None
+
+                    for hop_url in hops:
+                        parsed = urlparse(hop_url)
+                        hop_path = parsed.path.strip("/")
+                        scenario += "\n    # Follow redirect automatically\n"
+                        scenario += f"    * def redirectUrl = responseHeaders['Location'][0] || '{hop_url}'\n"
+                        scenario += f"    Given url redirectUrl\n"
+                        scenario += "    When method GET\n"
+                        scenario += "    Then status 200\n"
+                        scenario += "    And match response != null\n"
+
+                    scenario += "\n"
+
+                    f_domain.write(scenario)
+                    f_combined.write(scenario)
+
+            print(f"✅ Karate feature generated for {domain}: {domain_file}")
+
+    print(f"✅ Combined Karate feature generated: {combined_file}")
+
+
+def main(har_file):
+    output_dir = "output"
+    prefix = "extracted_api"
+
+    print(f"🔍 Parsing HAR: {har_file}")
+    api_data = extract_apis_from_har(har_file)
+
+    print(f"📄 Generating OpenAPI YAMLs...")
+    generate_openapi(api_data, output_dir, prefix)
+
+    print(f"🤖 Generating Karate feature files...")
+    generate_karate_features(api_data, output_dir, prefix)
+
+    print("✅ Done!")
+
+
+if __name__ == "__main__":
+    har_file = "C://Users//sonal//Downloads//google.har"  # replace with your HAR path
+    main(har_file)
