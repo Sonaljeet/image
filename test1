@@ -1,28 +1,3 @@
-class Alpha 
-	{
-	    static String s = " ";
-	    protected Alpha() 
-	    {
-	        s += "alpha ";
-	    }
-	}
-	class SubAlpha extends Alpha 
-	{
-	    private SubAlpha() 
-	    {
-	        s += "sub ";
-	    }
-	}
-	 
-	public class SubSubAlpha extends Alpha 
-	{
-	    private SubSubAlpha() 
-	    {
-	        s += "subsub ";
-	    }
-	    public static void main(String[] args) 
-	    {
-	        new SubSubAlpha();
-	        System.out.println(s);
-	    }
-	}
+I’d like to take a moment to thank Dipti for the guidance and support she has provided throughout her time with us. 
+She established our team back in 2023, and her leadership in setting things up and supporting our day-to-day functioning 
+has played an important role in the steady growth of the team.
